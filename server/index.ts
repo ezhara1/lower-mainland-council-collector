@@ -41,6 +41,7 @@ const runSchema = z.object({
   hostAVoice: z.string().optional(),
   hostBVoice: z.string().optional(),
   audioConcurrency: z.number().int().min(1).max(3).optional(),
+  browserAssisted: z.boolean().optional(),
 });
 
 app.get("/api/health", (_request, response) => {

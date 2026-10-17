@@ -79,6 +79,7 @@ export function App() {
   const [hostAVoice, setHostAVoice] = useState("af_heart");
   const [hostBVoice, setHostBVoice] = useState("am_michael");
   const [audioConcurrency, setAudioConcurrency] = useState(1);
+  const [browserAssisted, setBrowserAssisted] = useState(false);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -176,6 +177,7 @@ export function App() {
           hostAVoice,
           hostBVoice,
           audioConcurrency,
+          browserAssisted,
         }),
       });
       setResult(runResult);
@@ -258,6 +260,14 @@ export function App() {
               </button>
             </div>
           </div>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={browserAssisted}
+              onChange={(event) => setBrowserAssisted(event.target.checked)}
+            />
+            Open a local browser for protected portals such as West Vancouver
+          </label>
 
           <div className="section-heading compact">
             <div>

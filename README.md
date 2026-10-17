@@ -85,6 +85,8 @@ For distinct Chatterbox hosts, enter paths to two local reference audio files in
 
 Podcast audio is rendered as numbered parts under `.data/generated/<run-id>/`. The app begins speech generation as soon as each script segment is returned, keeps OpenRouter and speech work moving concurrently, and concatenates the completed WAV parts in order. Keep audio concurrency at `1` for typical laptops or Chatterbox; use `2` or `3` only when the machine has sufficient RAM or GPU memory.
 
+For portals protected by Cloudflare, enable browser-assisted access before a run. The app opens a visible local Chrome window with a persistent profile under `.data/browser-profiles/`, waits up to two minutes for any manual verification, and reuses the resulting cookies on later runs.
+
 When using a virtual environment, start the Node app from the activated environment so `python3` resolves to that interpreter.
 
 ## Development checks

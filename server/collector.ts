@@ -1,4 +1,5 @@
 import path from "node:path";
+import { mkdir, readFile } from "node:fs/promises";
 import * as cheerio from "cheerio";
 import { chromium } from "playwright";
 import { extractText } from "./extract.js";
@@ -7,6 +8,27 @@ import type { CollectedDocument, MunicipalSource } from "./types.js";
 
 const DOCUMENT_PATTERN =
   /\.(pdf|docx?|txt)(?:$|\?)|agenda|minutes|meeting|council|package|report/i;
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131 Safari/537.36";
+
+async function fetchWithRetry(
+  url: string | URL,
+  options: RequestInit,
+  attempts = 5,
+) {
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    response = await fetch(url, options);
+    if (response.status !== 429 && response.status < 500) return response;
+    if (attempt === attempts - 1) return response;
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const delay = Number.isFinite(retryAfter)
+      ? retryAfter * 1_000
+      : Math.min(30_000, 2_000 * 2 ** attempt);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  return response!;
+}
 
 function safeFileName(value: string) {
   return value
@@ -29,10 +51,9 @@ function extension(url: string, contentType: string) {
 }
 
 async function fetchBuffer(url: string) {
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     headers: {
-      "user-agent":
-        "LowerMainlandCouncilCollector/0.1 (+personal civic research)",
+      "user-agent": BROWSER_USER_AGENT,
       accept: "text/html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,*/*",
     },
     redirect: "follow",
@@ -50,7 +71,54 @@ async function fetchBuffer(url: string) {
   };
 }
 
+async function fetchBrowserDownload(url: string) {
+  let browser;
+  try {
+    browser = await chromium.launch({ channel: "chrome", headless: true });
+  } catch {
+    browser = await chromium.launch({ headless: true });
+  }
+  try {
+    const context = await browser.newContext({
+      acceptDownloads: true,
+      userAgent: BROWSER_USER_AGENT,
+    });
+    const page = await context.newPage();
+    const parsed = new URL(url);
+    await page.goto(parsed.origin, {
+      waitUntil: "domcontentloaded",
+      timeout: 45_000,
+    });
+    const downloadPromise = page.waitForEvent("download", { timeout: 45_000 });
+    await page.evaluate((downloadUrl) => {
+      window.location.href = downloadUrl;
+    }, url);
+    const download = await downloadPromise;
+    const temporaryPath = await download.path();
+    if (!temporaryPath) throw new Error("Browser download did not create a file.");
+    const bytes = await readFile(temporaryPath);
+    const fileName = download.suggestedFilename().toLowerCase();
+    const contentType = fileName.endsWith(".pdf")
+      ? "application/pdf"
+      : fileName.endsWith(".docx")
+        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        : "application/octet-stream";
+    return { bytes, contentType, finalUrl: url };
+  } finally {
+    await browser.close();
+  }
+}
+
 type Candidate = { url: string; title: string; date: string | null };
+let escribeCalendarQueue = Promise.resolve();
+
+async function waitForEscribeCalendarSlot() {
+  const current = escribeCalendarQueue.then(
+    () => new Promise<void>((resolve) => setTimeout(resolve, 750)),
+  );
+  escribeCalendarQueue = current.catch(() => undefined);
+  await current;
+}
 
 function escribeBase(source: MunicipalSource) {
   return [source.meetingPortalUrl, source.calendarUrl].find((url) =>
@@ -66,13 +134,13 @@ async function discoverEscribeCandidates(
   const base = escribeBase(source);
   if (!base) throw new Error("eSCRIBE source has no eSCRIBE portal URL.");
   const endpoint = new URL("/MeetingsCalendarView.aspx/GetCalendarMeetings", base);
-  const response = await fetch(endpoint, {
+  await waitForEscribeCalendarSlot();
+  const response = await fetchWithRetry(endpoint, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       referer: base,
-      "user-agent":
-        "LowerMainlandCouncilCollector/0.1 (+personal civic research)",
+      "user-agent": BROWSER_USER_AGENT,
     },
     body: JSON.stringify({
       calendarStartDate: `${dateFrom}T00:00:00-08:00`,
@@ -118,6 +186,131 @@ async function discoverEscribeCandidates(
   return candidates;
 }
 
+async function discoverNorthVancouverDistrictCandidates(
+  dateFrom: string,
+  dateTo: string,
+) {
+  const endpoint = new URL(
+    "https://simplicity-api.dnv.org/public/event/search/advanced",
+  );
+  endpoint.searchParams.set("from", `${dateFrom} 00:00:00`);
+  endpoint.searchParams.set("to", `${dateTo} 23:59:59`);
+  endpoint.searchParams.set("model_filters[0][type]", "model.council-meeting-v3");
+  endpoint.searchParams.set("model_filters[1][type]", "model.committee-meeting-v3");
+  endpoint.searchParams.set("include[0]", "meeting");
+  endpoint.searchParams.set("include[1]", "model");
+  endpoint.searchParams.set("page", "1");
+  endpoint.searchParams.set("pageSize", "500");
+  endpoint.searchParams.set("sort", "start_at");
+  endpoint.searchParams.set("sortdir", "asc");
+  const response = await fetchWithRetry(endpoint, {
+    headers: { "user-agent": BROWSER_USER_AGENT },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) {
+    throw new Error(`North Vancouver District API returned ${response.status}.`);
+  }
+  const payload = (await response.json()) as {
+    results?: {
+      start_at?: string;
+      event?: { title?: string };
+      model?: {
+        fields?: {
+          name?: string;
+          values?: { value?: string }[];
+        }[];
+      };
+    }[];
+  };
+  const candidates: Candidate[] = [];
+  for (const result of payload.results ?? []) {
+    const date = findDate(result.start_at ?? "");
+    const documentIds =
+      result.model?.fields
+        ?.find((field) => field.name === "council_documents")
+        ?.values?.flatMap((value) => (value.value ? [value.value] : [])) ?? [];
+    for (const documentId of documentIds) {
+      const metadataResponse = await fetchWithRetry(
+        `https://simplicity-api.dnv.org/public/media/documents/${documentId}`,
+        {
+          headers: { "user-agent": BROWSER_USER_AGENT },
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+      if (!metadataResponse.ok) continue;
+      const metadata = (await metadataResponse.json()) as {
+        title?: string;
+        url?: string;
+      };
+      if (!metadata.url) continue;
+      candidates.push({
+        url: metadata.url,
+        title:
+          metadata.title ?? result.event?.title ?? "Council meeting document",
+        date,
+      });
+    }
+  }
+  return candidates;
+}
+
+async function renderPersistentPage(
+  url: string,
+  profileName: string,
+  browserAssisted: boolean,
+) {
+  const profilePath = path.resolve(".data", "browser-profiles", profileName);
+  await mkdir(profilePath, { recursive: true });
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(profilePath, {
+      channel: "chrome",
+      headless: !browserAssisted,
+      userAgent: BROWSER_USER_AGENT,
+    });
+  } catch {
+    context = await chromium.launchPersistentContext(profilePath, {
+      headless: !browserAssisted,
+      userAgent: BROWSER_USER_AGENT,
+    });
+  }
+  try {
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.waitForTimeout(2_000);
+    let bodyText = await page.locator("body").innerText().catch(() => "");
+    if (
+      browserAssisted &&
+      /sorry, you have been blocked|attention required|verify you are human/i.test(
+        bodyText,
+      )
+    ) {
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        await page.waitForTimeout(2_000);
+        bodyText = await page.locator("body").innerText().catch(() => "");
+        if (
+          !/sorry, you have been blocked|attention required|verify you are human/i.test(
+            bodyText,
+          )
+        ) {
+          break;
+        }
+      }
+    }
+    if (/sorry, you have been blocked|attention required/i.test(bodyText)) {
+      throw new Error(
+        browserAssisted
+          ? "Cloudflare still blocked the verified browser session."
+          : "Portal blocked the browser session with Cloudflare. Retry with browser-assisted access enabled.",
+      );
+    }
+    return { html: await page.content(), finalUrl: page.url() };
+  } finally {
+    await context.close();
+  }
+}
+
 async function renderPage(url: string) {
   let browser;
   try {
@@ -127,11 +320,16 @@ async function renderPage(url: string) {
   }
   try {
     const page = await browser.newPage({
-      userAgent:
-        "LowerMainlandCouncilCollector/0.1 (+personal civic research)",
+      userAgent: BROWSER_USER_AGENT,
     });
-    await page.goto(url, { waitUntil: "networkidle", timeout: 45_000 });
-    return { html: await page.content(), finalUrl: page.url() };
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.waitForTimeout(2_000);
+    const html = await page.content();
+    const bodyText = await page.locator("body").innerText().catch(() => "");
+    if (/sorry, you have been blocked|attention required/i.test(bodyText)) {
+      throw new Error("Portal blocked the browser session with Cloudflare.");
+    }
+    return { html, finalUrl: page.url() };
   } finally {
     await browser.close();
   }
@@ -169,7 +367,11 @@ async function discoverCandidates(
   source: MunicipalSource,
   dateFrom: string,
   dateTo: string,
+  browserAssisted: boolean,
 ) {
+  if (source.id === "north-vancouver-district") {
+    return discoverNorthVancouverDistrictCandidates(dateFrom, dateTo);
+  }
   if (source.platform === "escribe") {
     return discoverEscribeCandidates(source, dateFrom, dateTo);
   }
@@ -190,7 +392,10 @@ async function discoverCandidates(
   } catch {
     // Browser fallback below handles JavaScript portals and bot-protected HTML.
   }
-  const rendered = await renderPage(startUrl);
+  const rendered =
+    source.id === "west-vancouver"
+      ? await renderPersistentPage(startUrl, source.id, browserAssisted)
+      : await renderPage(startUrl);
   const renderedCandidates = candidatesFromHtml(rendered.html, rendered.finalUrl);
   if (!renderedCandidates.length) {
     throw new Error(
@@ -227,8 +432,14 @@ export async function collectSource(
   source: MunicipalSource,
   dateFrom: string,
   dateTo: string,
+  options: { browserAssisted?: boolean } = {},
 ) {
-  const candidates = await discoverCandidates(source, dateFrom, dateTo);
+  const candidates = await discoverCandidates(
+    source,
+    dateFrom,
+    dateTo,
+    options.browserAssisted ?? false,
+  );
   const dated = candidates.filter((candidate) =>
     inRange(candidate.date, dateFrom, dateTo),
   );
@@ -240,10 +451,25 @@ export async function collectSource(
     try {
       fetched = await fetchBuffer(candidate.url);
     } catch (error) {
-      downloadErrors.push(
-        `${candidate.title}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      continue;
+      if (/FileStream\.ashx/i.test(candidate.url)) {
+        try {
+          fetched = await fetchBrowserDownload(candidate.url);
+        } catch (browserError) {
+          downloadErrors.push(
+            `${candidate.title}: ${
+              browserError instanceof Error
+                ? browserError.message
+                : String(browserError)
+            }`,
+          );
+          continue;
+        }
+      } else {
+        downloadErrors.push(
+          `${candidate.title}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        continue;
+      }
     }
     const nested = fetched.contentType.includes("html")
       ? nestedDocuments(
@@ -252,7 +478,9 @@ export async function collectSource(
           candidate.date,
         )
       : [];
-    const downloadable = nested.length ? nested : [candidate];
+    const downloadable = fetched.contentType.includes("html")
+      ? [candidate, ...nested]
+      : [candidate];
     for (const item of downloadable.slice(0, 50)) {
       let downloaded;
       try {

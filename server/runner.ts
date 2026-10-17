@@ -53,6 +53,7 @@ export async function runCollection(request: RunRequest): Promise<RunResult> {
         source,
         request.dateFrom,
         request.dateTo,
+        { browserAssisted: request.browserAssisted },
       );
       for (const document of documents) {
         if (existing.has(document.url)) {

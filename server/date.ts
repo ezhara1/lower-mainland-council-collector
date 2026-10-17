@@ -2,7 +2,9 @@ const MONTHS =
   "january|february|march|april|may|june|july|august|september|october|november|december";
 
 export function findDate(value: string): string | null {
-  const iso = value.match(/\b(20\d{2})[-_/](\d{1,2})[-_/](\d{1,2})\b/);
+  const iso = value.match(
+    /\b(20\d{2})[-_/](\d{1,2})[-_/](\d{1,2})(?=\D|$)/,
+  );
   if (iso) {
     return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
   }
