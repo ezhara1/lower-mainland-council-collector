@@ -5,6 +5,7 @@ describe("findDate", () => {
   it("parses ISO-like dates", () => {
     expect(findDate("Council agenda 2026-10-14.pdf")).toBe("2026-10-14");
     expect(findDate("2026-10-05T19:00:00.000Z")).toBe("2026-10-05");
+    expect(findDate("Open_Council_9-28-2026.pdf")).toBe("2026-09-28");
   });
 
   it("parses named dates", () => {

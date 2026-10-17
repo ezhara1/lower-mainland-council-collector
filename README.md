@@ -122,4 +122,6 @@ Municipal meeting platforms vary. Some expose stable server-rendered lists, whil
 
 The collector tries direct HTTP and vendor links first. It starts a headless Playwright browser only when a portal blocks direct requests or returns a JavaScript shell without document links.
 
+Vancouver and West Vancouver sit behind Cloudflare and block cloud or datacenter IP addresses. Vancouver's meeting list loads through a local browser, and its agenda and minutes pages are then downloaded through that browser session. Both work best from a home connection with browser-assisted access enabled.
+
 The collector only follows official municipal or official meeting-portal URLs.

@@ -72,7 +72,7 @@ async function fetchBuffer(url: string) {
   };
 }
 
-async function fetchBrowserDownload(url: string) {
+async function fetchBrowserDownload(url: string, allowHtml = false) {
   let browser;
   try {
     browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -80,31 +80,19 @@ async function fetchBrowserDownload(url: string) {
     browser = await chromium.launch({ headless: true });
   }
   try {
-    const context = await browser.newContext({
-      acceptDownloads: true,
-      userAgent: BROWSER_USER_AGENT,
-    });
+    const context = await browser.newContext({ userAgent: BROWSER_USER_AGENT });
     const page = await context.newPage();
-    const parsed = new URL(url);
-    await page.goto(parsed.origin, {
+    await page.goto(new URL(url).origin, {
       waitUntil: "domcontentloaded",
       timeout: 45_000,
     });
-    const downloadPromise = page.waitForEvent("download", { timeout: 45_000 });
-    await page.evaluate((downloadUrl) => {
-      window.location.href = downloadUrl;
-    }, url);
-    const download = await downloadPromise;
-    const temporaryPath = await download.path();
-    if (!temporaryPath) throw new Error("Browser download did not create a file.");
-    const bytes = await readFile(temporaryPath);
-    const fileName = download.suggestedFilename().toLowerCase();
-    const contentType = fileName.endsWith(".pdf")
-      ? "application/pdf"
-      : fileName.endsWith(".docx")
-        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        : "application/octet-stream";
-    return { bytes, contentType, finalUrl: url };
+    await page.waitForTimeout(2_000);
+    const response = await context.request.get(url, { timeout: 45_000 });
+    const contentType = response.headers()["content-type"] ?? "application/octet-stream";
+    if (!response.ok() || (!allowHtml && contentType.includes("html"))) {
+      throw new Error(`Browser download returned ${response.status()} ${contentType}.`);
+    }
+    return { bytes: Buffer.from(await response.body()), contentType, finalUrl: url };
   } finally {
     await browser.close();
   }
@@ -364,6 +352,220 @@ function candidatesFromHtml(html: string, finalUrl: string) {
   return [...candidates.values()];
 }
 
+function vancouverDate(timestampSeconds: number) {
+  return new Date(timestampSeconds * 1_000).toLocaleDateString("en-CA", {
+    timeZone: "America/Vancouver",
+  });
+}
+
+function yearsInRange(dateFrom: string, dateTo: string) {
+  const years: number[] = [];
+  for (let year = Number(dateFrom.slice(0, 4)); year <= Number(dateTo.slice(0, 4)); year += 1) {
+    years.push(year);
+  }
+  return years;
+}
+
+function usDate(isoDate: string) {
+  const [year, month, day] = isoDate.split("-");
+  return `${month}/${day}/${year}`;
+}
+
+async function fetchHtml(url: string) {
+  const { bytes, finalUrl } = await fetchBuffer(url);
+  return { html: bytes.toString("utf8"), finalUrl };
+}
+
+async function launchProfileContext(profileName: string, browserAssisted: boolean) {
+  const profilePath = dataPath("browser-profiles", profileName);
+  await mkdir(profilePath, { recursive: true });
+  try {
+    return await chromium.launchPersistentContext(profilePath, {
+      channel: "chrome",
+      headless: !browserAssisted,
+      userAgent: BROWSER_USER_AGENT,
+    });
+  } catch {
+    return chromium.launchPersistentContext(profilePath, {
+      headless: !browserAssisted,
+      userAgent: BROWSER_USER_AGENT,
+    });
+  }
+}
+
+type VancouverMeeting = {
+  eventTitle?: string;
+  eventDateStart?: string;
+  relatedURL?: string;
+  relatedURLName?: string;
+};
+
+async function discoverVancouverCandidates(browserAssisted: boolean) {
+  const context = await launchProfileContext("vancouver", browserAssisted);
+  try {
+    const page = context.pages()[0] ?? (await context.newPage());
+    const meetings: VancouverMeeting[] = [];
+    page.on("response", async (response) => {
+      if (!/CouncilMeetings\.API\/api\/CouncilMeetings\?type=/i.test(response.url())) return;
+      try {
+        meetings.push(...((await response.json()) as VancouverMeeting[]));
+      } catch {
+        // Ignore non-JSON responses such as challenge pages.
+      }
+    });
+    await page.goto("https://app.vancouver.ca/CouncilMeetingPublic/CouncilMeetings", {
+      waitUntil: "domcontentloaded",
+      timeout: 45_000,
+    });
+    await page.waitForTimeout(4_000);
+    await page.getByText("Previous meetings", { exact: true }).click({ timeout: 15_000 });
+    await page.waitForTimeout(4_000);
+    if (!meetings.length) {
+      throw new Error(
+        "Vancouver meeting list did not load. Retry with browser-assisted access enabled.",
+      );
+    }
+    const candidates = new Map<string, Candidate>();
+    for (const meeting of meetings) {
+      if (!meeting.relatedURL) continue;
+      const url = new URL(meeting.relatedURL, "https://council.vancouver.ca/").toString();
+      candidates.set(url, {
+        url,
+        title: `${meeting.eventTitle?.trim() || "Council meeting"} - ${
+          meeting.relatedURLName || "Agenda"
+        }`,
+        date: findDate(meeting.eventDateStart ?? ""),
+      });
+    }
+    return [...candidates.values()];
+  } finally {
+    await context.close();
+  }
+}
+
+const RICHMOND_CATEGORIES = [6, 4, 8, 13, 17, 23, 24, 25, 27];
+
+async function discoverRichmondCandidates(dateFrom: string, dateTo: string) {
+  const candidates = new Map<string, Candidate>();
+  for (const year of yearsInRange(dateFrom, dateTo)) {
+    for (const category of RICHMOND_CATEGORIES) {
+      const { html, finalUrl } = await fetchHtml(
+        `https://citycouncil.richmond.ca/schedule/WebAgendaMinutesList.aspx?Category=${category}&Year=${year}`,
+      );
+      const $ = cheerio.load(html);
+      $("table[id*='GridView'] a[href]").each((_, element) => {
+        const href = $(element).attr("href");
+        if (!href || !/agendafiles|\/agendas\/|minutes|\.pdf/i.test(href)) return;
+        const url = new URL(href, finalUrl).toString();
+        let date: string | null = null;
+        for (const cell of $(element).parents("td").toArray()) {
+          date = findDate($(cell).text().replace(/\s+/g, " "));
+          if (date) break;
+        }
+        const heading = $("h1").first().text().replace(/\s+/g, " ").trim();
+        candidates.set(url, {
+          url,
+          title: `${heading || "Council"} - ${$(element).text().replace(/\s+/g, " ").trim()}`,
+          date: date ?? findDate(url),
+        });
+      });
+    }
+  }
+  return [...candidates.values()];
+}
+
+async function discoverLangleyTownshipCandidates(dateFrom: string, dateTo: string) {
+  const base = "https://calendar.tol.ca";
+  const search = `${base}/meetings/Index?action=search&StartDate=${usDate(dateFrom)}&EndDate=${usDate(dateTo)}&Category=&Keywords=`;
+  const candidates = new Map<string, Candidate>();
+  const meetingPages = new Set<string>();
+  const collectLinks = (html: string, pageUrl: string) => {
+    const $ = cheerio.load(html);
+    $("a[href*='/meetings/Detail/']").each((_, element) => {
+      const url = new URL($(element).attr("href")!, pageUrl);
+      const segments = url.pathname.split("/").filter(Boolean);
+      const date = findDate(segments[2] ?? "");
+      if (segments.length >= 4) {
+        const label =
+          $(element).attr("aria-label") || $(element).text().replace(/\s+/g, " ").trim();
+        candidates.set(url.toString(), {
+          url: url.toString(),
+          title: label.replace(/\.pdf$/i, "") || "Meeting attachment",
+          date,
+        });
+      } else if (segments.length === 3) {
+        meetingPages.add(url.toString());
+      }
+    });
+  };
+  const listing = await fetchHtml(search);
+  collectLinks(listing.html, listing.finalUrl);
+  for (const page of meetingPages) {
+    try {
+      const detail = await fetchHtml(page);
+      collectLinks(detail.html, detail.finalUrl);
+    } catch {
+      // Attachments from the listing are still collected.
+    }
+  }
+  return [...candidates.values()];
+}
+
+async function discoverBowenIslandCandidates() {
+  const base = "https://bowenisland.civicweb.net";
+  const response = await fetchWithRetry(
+    `${base}/api/meetings?meetingtypeids=[8,12,16]`,
+    { headers: { "user-agent": BROWSER_USER_AGENT }, signal: AbortSignal.timeout(30_000) },
+  );
+  if (!response.ok) throw new Error(`CivicWeb meetings API returned ${response.status}.`);
+  const payload = (await response.json()) as {
+    Meetings?: {
+      Name?: string;
+      TimeStamp?: number;
+      AgendaOpenPdfId?: number;
+      MinutesOpenPdfId?: number;
+    }[];
+  };
+  const candidates: Candidate[] = [];
+  for (const meeting of payload.Meetings ?? []) {
+    if (!meeting.TimeStamp) continue;
+    const date = vancouverDate(meeting.TimeStamp);
+    const name = meeting.Name ?? "Council meeting";
+    if (meeting.AgendaOpenPdfId) {
+      candidates.push({ url: `${base}/document/${meeting.AgendaOpenPdfId}/`, title: `${name} - Agenda`, date });
+    }
+    if (meeting.MinutesOpenPdfId) {
+      candidates.push({ url: `${base}/document/${meeting.MinutesOpenPdfId}/`, title: `${name} - Minutes`, date });
+    }
+  }
+  return candidates;
+}
+
+const SURREY_LISTINGS = [
+  "https://www.surrey.ca/city-government/council-meetings",
+  "https://www.surrey.ca/city-government/council-meetings/council-committee-commission-board-and-task-force-minutes",
+  "https://www.surrey.ca/city-government/council-meetings/corporate-reports",
+  "https://www.surrey.ca/city-government/council-meetings/planning-reports",
+];
+
+async function discoverListingCandidates(urls: string[]) {
+  const candidates = new Map<string, Candidate>();
+  for (const listingUrl of urls) {
+    const { html, finalUrl } = await fetchHtml(listingUrl);
+    for (const candidate of candidatesFromHtml(html, finalUrl)) {
+      if (!/\.(pdf|docx?)(?:$|\?)/i.test(candidate.url)) continue;
+      const fileName = decodeURIComponent(
+        new URL(candidate.url).pathname.split("/").pop() ?? "",
+      ).replace(/\.[a-z]+$/i, "");
+      const title = /^(view|download|pdf|open|council meeting document)$/i.test(candidate.title)
+        ? fileName
+        : candidate.title;
+      candidates.set(candidate.url, { ...candidate, title });
+    }
+  }
+  return [...candidates.values()];
+}
+
 async function discoverCandidates(
   source: MunicipalSource,
   dateFrom: string,
@@ -373,6 +575,13 @@ async function discoverCandidates(
   if (source.id === "north-vancouver-district") {
     return discoverNorthVancouverDistrictCandidates(dateFrom, dateTo);
   }
+  if (source.id === "vancouver") return discoverVancouverCandidates(browserAssisted);
+  if (source.id === "richmond") return discoverRichmondCandidates(dateFrom, dateTo);
+  if (source.id === "langley-township") {
+    return discoverLangleyTownshipCandidates(dateFrom, dateTo);
+  }
+  if (source.id === "bowen-island") return discoverBowenIslandCandidates();
+  if (source.id === "surrey") return discoverListingCandidates(SURREY_LISTINGS);
   if (source.platform === "escribe") {
     return discoverEscribeCandidates(source, dateFrom, dateTo);
   }
@@ -429,6 +638,8 @@ function nestedDocuments(html: string, baseUrl: string, meetingDate: string | nu
   return [...documents.values()];
 }
 
+const BROWSER_DOWNLOAD_SOURCES = new Set(["vancouver", "west-vancouver"]);
+
 export async function collectSource(
   source: MunicipalSource,
   dateFrom: string,
@@ -452,9 +663,10 @@ export async function collectSource(
     try {
       fetched = await fetchBuffer(candidate.url);
     } catch (error) {
-      if (/FileStream\.ashx/i.test(candidate.url)) {
+      const browserPortal = BROWSER_DOWNLOAD_SOURCES.has(source.id);
+      if (browserPortal || /FileStream\.ashx/i.test(candidate.url)) {
         try {
-          fetched = await fetchBrowserDownload(candidate.url);
+          fetched = await fetchBrowserDownload(candidate.url, browserPortal);
         } catch (browserError) {
           downloadErrors.push(
             `${candidate.title}: ${
