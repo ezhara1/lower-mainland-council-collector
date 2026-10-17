@@ -272,7 +272,8 @@ textarea:focus {
 
 .source input,
 .switch-row input,
-.check-field input {
+.check-field input,
+.check-row input {
   width: 16px;
   min-height: 16px;
   accent-color: var(--green);
@@ -482,4 +483,12 @@ button:disabled {
   .panel {
     padding: 22px;
   }
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  cursor: pointer;
 }

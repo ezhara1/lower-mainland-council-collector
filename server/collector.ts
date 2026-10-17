@@ -5,6 +5,7 @@ import { chromium } from "playwright";
 import { extractText } from "./extract.js";
 import { findDate, inRange } from "./date.js";
 import type { CollectedDocument, MunicipalSource } from "./types.js";
+import { dataPath } from "./paths.js";
 
 const DOCUMENT_PATTERN =
   /\.(pdf|docx?|txt)(?:$|\?)|agenda|minutes|meeting|council|package|report/i;
@@ -259,7 +260,7 @@ async function renderPersistentPage(
   profileName: string,
   browserAssisted: boolean,
 ) {
-  const profilePath = path.resolve(".data", "browser-profiles", profileName);
+  const profilePath = dataPath("browser-profiles", profileName);
   await mkdir(profilePath, { recursive: true });
   let context;
   try {

@@ -34,6 +34,24 @@ Open `http://localhost:5173`. The API listens on `http://localhost:8787`.
 
 Data and credentials are written to `.data/`, which is excluded from Git.
 
+## Desktop app
+
+The same app runs as a standalone Electron window, with the collector service running inside it.
+
+```bash
+npm install
+npx playwright install chromium
+npm run desktop
+```
+
+To build an installer for the current operating system (`.dmg` on macOS, `.exe` on Windows, `.AppImage` on Linux):
+
+```bash
+npm run package:desktop
+```
+
+Installers are written to `release/`. Build each platform's installer on that platform. The desktop app stores settings, run history, downloads, and browser profiles in the operating system's app-data folder instead of `.data/`. Google sign-in opens in your default browser and returns to the app through `http://localhost:8787/api/google/callback`, so keep port 8787 free while the app is open.
+
 ## Google Drive setup
 
 1. Create a Google Cloud project.

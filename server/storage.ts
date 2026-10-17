@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppSettings, RunResult } from "./types.js";
+import { dataDir } from "./paths.js";
 
-const dataDir = path.resolve(".data");
+
 const settingsPath = path.join(dataDir, "settings.json");
 const ledgerPath = path.join(dataDir, "downloaded.json");
 const runsPath = path.join(dataDir, "runs.json");

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { appPath } from "./paths.js";
 
 type SynthesisOptions = {
   provider: "kokoro" | "chatterbox";
@@ -20,7 +21,7 @@ export async function synthesize(
     const child = spawn(
       "python3",
       [
-        path.resolve("scripts/synthesize.py"),
+        appPath("scripts", "synthesize.py"),
         "--provider",
         options.provider,
         "--input",
@@ -56,7 +57,7 @@ export async function combineAudioParts(
     const child = spawn(
       "python3",
       [
-        path.resolve("scripts/combine_audio.py"),
+        appPath("scripts", "combine_audio.py"),
         "--output",
         outputPath,
         ...partPaths,

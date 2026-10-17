@@ -11,10 +11,13 @@
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist-server/index.js",
+    "desktop": "npm run build && npm run build:server && electron .",
+    "package:desktop": "npm run build && npm run build:server && electron-builder"
   },
   "keywords": [],
-  "author": "",
+  "author": "ezhara1",
   "license": "MIT",
   "dependencies": {
     "cheerio": "^1.2.0",
@@ -36,10 +39,41 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^10.0.6",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
     "eslint": "^10.13.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"
+  },
+  "main": "electron/main.mjs",
+  "build": {
+    "appId": "ca.lowermainland.councilcollector",
+    "productName": "Council Collector",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-server/**",
+      "electron/**",
+      "scripts/*.py",
+      "source-registry.json",
+      "package.json"
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.news"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office"
+    }
   }
 }
