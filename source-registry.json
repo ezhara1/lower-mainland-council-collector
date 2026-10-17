@@ -1,0 +1,410 @@
+{
+  "caveats": [
+    "Richmond: never use pub-richmond.escribemeetings.com - that tenant is Richmond, California; use citycouncil.richmond.ca.",
+    "Blocked to plain HTTP clients: all City of Vancouver hosts (403), West Vancouver HTML (Cloudflare 403), some portcoquitlam.ca paths, Port Moody ecalendar (403); require a real or headless browser.",
+    "JavaScript-only: District of North Vancouver site (React SPA, backend API unidentified), Electoral Area A (SharePoint; REST API available), Surrey Sliq Harmony video (API params unverified), Anmore wrapper/archive pages, and all eSCRIBE calendar UIs (use GetCalendarMeetings POST API instead).",
+    "eSCRIBE FileStream.ashx document downloads return 403 'Verifying your browser' (or 404) to curl for Burnaby, New Westminster, Lions Bay, White Rock, Delta, Langley City, Maple Ridge, Pitt Meadows; plan for headless-browser downloads or saved challenge cookies. Coquitlam, Port Coquitlam, Port Moody and Anmore FileStream behavior was not explicitly tested.",
+    "Ambiguous date semantics: eSCRIBE GetCalendarMeetings date range filters on meeting date (not posting date) - unconfirmed; Belcarra meeting dates must be parsed from PDF filenames (folder YYYY/MM is upload month); Langley Township search uses MM/DD/YYYY; Richmond and Port Coquitlam portal URLs pin a Year query param (2026 / 2023) that must be varied.",
+    "Missing/partial sources: Surrey has no Regular Council agenda archive (upcoming agendas only; Sliq may hold agendas); Lions Bay, Delta, Coquitlam and New Westminster split history across legacy archives (lionsbay.ca archive, CivicWeb, Granicus, CivicPlus AgendaCenter, publicdocs); West Vancouver video before 2024-01-15 by request only; Delta committee calendar only has events through Dec 2025.",
+    "Electoral Area A is disabled by default: it has no council; the MVRD Electoral Area Committee is the relevant body and the portal is shared across all Metro Vancouver boards, requiring filtering.",
+    "Platform values are normalized (escribe, custom, civicweb, sharepoint); legacy/secondary platforms (Granicus, CivicWeb archive, CivicPlus, Sliq, ISI) are noted in accessNotes only.",
+    "Unlinked/non-canonical hosts excluded: westvancouver.escribemeetings.com, langleycity.escribemeetings.com (staff login); non-resolving: pub-cnv, dnv, tol, langleytownship eSCRIBE hosts."
+  ],
+  "sources": [
+    {
+      "accessNotes": "All vancouver.ca/app.vancouver.ca/council.vancouver.ca hosts return 403 to curl; use a real/headless browser. Meeting list is JS (tabs, 10/page). Rows link to static agenda pages (council.vancouver.ca/YYYYMMDD/*ag.htm) whose PDFs live under /YYYYMMDD/documents/. Video on Sliq Harmony (csg001-harmony.sliq.net). Pre-2001: council.vancouver.ca/previous_years/previousyears.htm.",
+      "calendarUrl": "https://app.vancouver.ca/CouncilMeetingPublic/CouncilMeetings",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "reports",
+        "memoranda",
+        "decisions",
+        "video",
+        "in-camera-releases"
+      ],
+      "enabledByDefault": true,
+      "id": "vancouver",
+      "meetingPortalUrl": "https://app.vancouver.ca/CouncilMeetingPublic/CouncilMeetings",
+      "name": "Vancouver",
+      "officialName": "City of Vancouver",
+      "platform": "custom"
+    },
+    {
+      "accessNotes": "eSCRIBE embedded via iframe on burnaby.ca. Calendar UI needs JS; POST /MeetingsCalendarView.aspx/GetCalendarMeetings {calendarStartDate,calendarEndDate} works with curl (105 meetings Jan-Oct 2026). Meeting.aspx and FileStream.ashx return 403/404 to curl; fetch in a browser. Video also on video.isilive.ca/burnaby and YouTube.",
+      "calendarUrl": "https://www.burnaby.ca/our-city/meetings-and-public-hearings",
+      "documentTypes": [
+        "agenda",
+        "agenda-cover",
+        "revised-agenda",
+        "minutes",
+        "reports",
+        "video"
+      ],
+      "enabledByDefault": true,
+      "id": "burnaby",
+      "meetingPortalUrl": "https://pub-burnaby.escribemeetings.com/",
+      "name": "Burnaby",
+      "officialName": "City of Burnaby",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "eSCRIBE embedded via iframe. GetCalendarMeetings POST API works with curl (90 meetings for 2026). Meeting pages and filestream.ashx PDFs return 404 to curl; use a browser. Legacy video archive on Granicus (newwestcity.ca.granicus.com) linked from /city_hall/council_agendas_meetings/agendas_minutes.php.",
+      "calendarUrl": "https://www.newwestcity.ca/city_hall/council_agendas_meetings/council-meeting-agendas-reports-minutes",
+      "documentTypes": [
+        "agenda",
+        "agenda-cover",
+        "minutes",
+        "reports",
+        "presentations",
+        "notices",
+        "video"
+      ],
+      "enabledByDefault": true,
+      "id": "new-westminster",
+      "meetingPortalUrl": "https://pub-newwestcity.escribemeetings.com/",
+      "name": "New Westminster",
+      "officialName": "City of New Westminster",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "Server-rendered ASP.NET; curl works, no JS. List URL pattern WebAgendaMinutesList.aspx?Category=<id>&Year=<yyyy> (6 = City Council; committees 4,13,17,23,24,25,27 via /meetings.htm); vary Year rather than hardcoding 2026. PDFs under /agendafiles/. Video on YouTube. Calendar takes ?Month=M&Year=YYYY. Pre-2009: /agendas/archives.htm. NEVER use pub-richmond.escribemeetings.com (Richmond, California).",
+      "calendarUrl": "https://citycouncil.richmond.ca/schedule/WebMeetingCalendar.aspx",
+      "documentTypes": [
+        "agenda-cover",
+        "agenda-package",
+        "additional-documents",
+        "minutes",
+        "video",
+        "decisions"
+      ],
+      "enabledByDefault": true,
+      "id": "richmond",
+      "meetingPortalUrl": "https://citycouncil.richmond.ca/schedule/WebAgendaMinutesList.aspx?Category=6&Year=2026",
+      "name": "Richmond",
+      "officialName": "City of Richmond",
+      "platform": "custom"
+    },
+    {
+      "accessNotes": "Sitecore, server-rendered; curl works. Extract PDF hrefs from the agendas page (calendarUrl): /-/media/City-of-North-Vancouver/Documents/Council-Meeting-Agenda/{YYYY}/ and .../Council-Meeting-Minutes/{YYYY}/. Prior years at .../{YYYY}-Meetings/; older minutes at /City-Hall/Council-Meetings/Council-Minutes-Archive. Video on YouTube. No eSCRIBE/CivicWeb.",
+      "calendarUrl": "https://www.cnv.org/City-Hall/Council-Meetings/Council-Agendas,-Minutes-and-Videos",
+      "documentTypes": [
+        "agenda",
+        "agenda-package",
+        "minutes",
+        "notices",
+        "video",
+        "schedule"
+      ],
+      "enabledByDefault": true,
+      "id": "north-vancouver-city",
+      "meetingPortalUrl": "https://www.cnv.org/City-Hall/Council-Meetings",
+      "name": "North Vancouver City",
+      "officialName": "City of North Vancouver",
+      "platform": "custom"
+    },
+    {
+      "accessNotes": "JavaScript-only React SPA (raw HTML is an empty shell); render with headless Chrome; backend API not identified. Meeting pages /government-administration/regular-meeting-YYYYMMDD list PDFs on docs.dnv.org/documents/*.pdf plus YouTube embeds. 2011-2025 archive: /government-administration/council-meeting-document-archive-20112025 (app.dnv.org/OpenDocument/Default.aspx?docNum=N).",
+      "calendarUrl": "https://www.dnv.org/government-administration/council-and-committee-meetings",
+      "documentTypes": [
+        "agenda",
+        "agenda-package",
+        "notices",
+        "reports",
+        "presentations",
+        "minutes",
+        "video",
+        "schedule",
+        "archive"
+      ],
+      "enabledByDefault": true,
+      "id": "north-vancouver-district",
+      "meetingPortalUrl": "https://www.dnv.org/government-administration/council-and-committee-meetings",
+      "name": "North Vancouver District",
+      "officialName": "District of North Vancouver",
+      "platform": "custom"
+    },
+    {
+      "accessNotes": "Drupal behind Cloudflare: HTML pages return 403 to curl; headless Chrome works. Past/upcoming lists at /mayor-council/meetings/past and /upcoming; meeting pages /mayor-council/{regular-council-meeting|special-council-meeting|public-hearing}/{YYmonDD}. PDFs under /sites/default/files/media/documents/ fetch fine with curl. YouTube video; pre-2024-01-15 video by request only. westvancouver.escribemeetings.com is unlinked and not canonical.",
+      "calendarUrl": "https://westvancouver.ca/government-administration/mayor-council/council-meetings-calendar",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "notices",
+        "video",
+        "public-hearing-minutes"
+      ],
+      "enabledByDefault": true,
+      "id": "west-vancouver",
+      "meetingPortalUrl": "https://westvancouver.ca/mayor-council/council-agendas-minutes",
+      "name": "West Vancouver",
+      "officialName": "District of West Vancouver",
+      "platform": "custom"
+    },
+    {
+      "accessNotes": "eSCRIBE embedded in Drupal. GetCalendarMeetings POST API and HTML agendas (Meeting.aspx) work with curl; FileStream.ashx PDFs return 403 even with cookies/referer, so use a real browser. Video on YouTube channel UC1BWvI_X-4pmt22ximkXiIg (eSCRIBE HasVideo=false). Pre-Sept-2025 PDFs: lionsbay.ca/government/council-committee-meetings/agendas-minutes/archive.",
+      "calendarUrl": "https://www.lionsbay.ca/governance/council-committee-meetings/meeting-calendar-0",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "additional-documents",
+        "video",
+        "archive"
+      ],
+      "enabledByDefault": true,
+      "id": "lions-bay",
+      "meetingPortalUrl": "https://pub-lionsbay.escribemeetings.com/",
+      "name": "Lions Bay",
+      "officialName": "Village of Lions Bay",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "Server-rendered Drupal; extract PDF links. Agenda table lists upcoming meetings only; no Regular Council agenda archive found (Sliq may hold agendas). Minutes: .../council-committee-commission-board-and-task-force-minutes (MIN-<CODE>-YYYY-MM-DD.pdf); corporate reports (CR_YYYY-R###.pdf) and planning reports (PLR_*.pdf) pages. Calendar is a yearly schedule PDF only. Video: Sliq Harmony JS SPA (csg001-harmony.sliq.net/00404/...); its GetListViewData API params unverified.",
+      "calendarUrl": "https://www.surrey.ca/sites/default/files/media/documents/2026-Council-Meeting-Schedule.pdf",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "reports",
+        "planning-reports",
+        "action-items",
+        "video",
+        "livestream"
+      ],
+      "enabledByDefault": true,
+      "id": "surrey",
+      "meetingPortalUrl": "https://www.surrey.ca/city-government/council-meetings",
+      "name": "Surrey",
+      "officialName": "City of Surrey",
+      "platform": "custom"
+    },
+    {
+      "accessNotes": "eSCRIBE embedded via iframe (old CivicPlus AgendaCenter retired). GetCalendarMeetings POST API (Content-Type application/json) works with curl. FileStream.ashx returns 403 'Verifying your browser' to curl but 200 in Chrome; downloads need headless browser or challenge cookies. Video via HTML agenda and YouTube playlist PLULqpQrYGOK7fipHaCrSfo79wYzoTXmA5.",
+      "calendarUrl": "https://www.whiterockcity.ca/894/Council-Meeting-Agendas-Minutes-Videos",
+      "documentTypes": [
+        "agenda",
+        "agenda-addendum",
+        "post-agenda",
+        "minutes",
+        "additional-documents",
+        "video"
+      ],
+      "enabledByDefault": true,
+      "id": "white-rock",
+      "meetingPortalUrl": "https://pub-whiterockcity.escribemeetings.com/",
+      "name": "White Rock",
+      "officialName": "City of White Rock",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "eSCRIBE current from 2025-05-26; GetCalendarMeetings POST works with curl; FileStream.ashx behind eSCRIBE browser check. Pre-2025-05-26 docs on CivicWeb (delta.civicweb.net/filepro/documents/, server-rendered folders 241527, 234839, 224970, 30359, 30629, 29803). Pre-May-2025 video on Granicus (deltabc.ca.granicus.com/ViewPublisher.php?view_id=2). /Council-Meeting-Calendar is a committee calendar with events only to Dec 2025.",
+      "calendarUrl": "https://www.delta.ca/Council-Meetings",
+      "documentTypes": [
+        "agenda",
+        "agenda-addendum",
+        "post-agenda",
+        "minutes",
+        "reports",
+        "additional-documents",
+        "video",
+        "livestream"
+      ],
+      "enabledByDefault": true,
+      "id": "delta",
+      "meetingPortalUrl": "https://pub-delta.escribemeetings.com/",
+      "name": "Delta",
+      "officialName": "City of Delta",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "Use pub-langleycity (langleycity.escribemeetings.com is staff login). GetCalendarMeetings POST works with curl after a GET for cookies. FileStream.ashx returns 403 browser check to curl, 200 in Chrome. City page also lists direct FileStream links and yearly schedule subpages. YouTube: youtube.com/user/CityofLangley.",
+      "calendarUrl": "https://www.langleycity.ca/city-hall/city-council/council-meetings-public-hearings",
+      "documentTypes": [
+        "agenda",
+        "agenda-addendum",
+        "revised-agenda",
+        "post-agenda",
+        "minutes",
+        "additional-documents",
+        "video",
+        "livestream"
+      ],
+      "enabledByDefault": true,
+      "id": "langley-city",
+      "meetingPortalUrl": "https://pub-langleycity.escribemeetings.com/",
+      "name": "Langley City",
+      "officialName": "City of Langley",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "eSolutionsGroup iCreate calendar; server-rendered, no JS. Default view shows upcoming only; for past use /meetings/Index?action=search&StartDate=MM/DD/YYYY&EndDate=MM/DD/YYYY&Category=&Keywords= (US-style dates). Details at /meetings/Detail/YYYY-MM-DD-HHMM-<Type>; 'Agenda PDF'/'Minutes PDF' attachments return PDF on GET (HEAD returns 404). Video on YouTube. No eSCRIBE tenant.",
+      "calendarUrl": "https://calendar.tol.ca/meetings",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "video"
+      ],
+      "enabledByDefault": true,
+      "id": "langley-township",
+      "meetingPortalUrl": "https://calendar.tol.ca/meetings?_mid_=41630",
+      "name": "Langley Township",
+      "officialName": "Township of Langley",
+      "platform": "custom"
+    },
+    {
+      "accessNotes": "coquitlam.ca/1450 embeds pub-coquitlam eSCRIBE; static eSCRIBE HTML has no meeting rows, so use JS rendering or GetCalendarMeetings POST. Legacy: CivicPlus /AgendaCenter (server-rendered PDFs), Granicus coquitlam.ca.granicus.com/ViewPublisher.php?view_id=2 and publicdocs.coquitlam.ca via /1517/Archive-Agendas-and-Minutes. Live video via video.isilive.ca (/1498/Watch-Council-Meetings-Live).",
+      "calendarUrl": "https://pub-coquitlam.escribemeetings.com/",
+      "documentTypes": [
+        "agenda",
+        "agenda-package",
+        "minutes",
+        "reports",
+        "video"
+      ],
+      "enabledByDefault": true,
+      "id": "coquitlam",
+      "meetingPortalUrl": "https://www.coquitlam.ca/1450/Council-Agendas-and-Minutes",
+      "name": "Coquitlam",
+      "officialName": "City of Coquitlam",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "Linked from portcoquitlam.ca/our-government/city-council (official link pins ?Year=2023; pass ?Year=YYYY). Year list server-renders past meetings with Agenda/Minutes/Video links; calendar view needs JS/API. Documents via Meeting.aspx and FileStream.ashx. Schedule PDF: portcoquitlam.ca/media/file/2026-council-meeting-schedule. Some portcoquitlam.ca paths 403 to non-browser clients. YouTube @CityofPoco.",
+      "calendarUrl": "https://pub-portcoquitlam.escribemeetings.com/",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "video",
+        "schedule"
+      ],
+      "enabledByDefault": true,
+      "id": "port-coquitlam",
+      "meetingPortalUrl": "https://pub-portcoquitlam.escribemeetings.com/",
+      "name": "Port Coquitlam",
+      "officialName": "City of Port Coquitlam",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "Linked from portmoody.ca council-meetings page. eSCRIBE list server-renders meetings by ?Year=YYYY with Meeting.aspx links; calendar view needs JS or API. Many bodies (Regular Council, Council Standing Committee, Public Hearing). calendar.portmoody.ca/ecalendar.portmoody.ca returned 403 to curl. Video via portmoody.ca watch-live page and YouTube.",
+      "calendarUrl": "https://pub-portmoody.escribemeetings.com/meetingscalendarview.aspx",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "reports",
+        "video"
+      ],
+      "enabledByDefault": true,
+      "id": "port-moody",
+      "meetingPortalUrl": "https://pub-portmoody.escribemeetings.com/",
+      "name": "Port Moody",
+      "officialName": "City of Port Moody",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "WordPress page sets the pub-anmore eSCRIBE iframe via JS (no links in page HTML); fetch eSCRIBE directly (?Year=YYYY) or via calendar API. Archive page anmore.com/village-hall/mayor-council/agendas-minutes-archive/ appears JS-rendered (no static PDF links). Schedule PDF: anmore.com/wp-content/uploads/2025/11/2026-Council-Schedule.pdf. YouTube channel UCeLV-BY6qZzAVEKX5cMWcAQ.",
+      "calendarUrl": "https://pub-anmore.escribemeetings.com/",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "video",
+        "schedule"
+      ],
+      "enabledByDefault": true,
+      "id": "anmore",
+      "meetingPortalUrl": "https://anmore.com/village-hall/mayor-council/agendas-minutes/",
+      "name": "Anmore",
+      "officialName": "Village of Anmore",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "Single server-rendered WordPress page with hundreds of direct PDF links (belcarra.ca/assets/media/YYYY/MM/, 2018-present); no JS. No structured calendar: meeting dates must be parsed from filenames (the /YYYY/MM/ path is upload date, not meeting date). Video via YouTube @villageofbelcarra9617.",
+      "calendarUrl": "https://belcarra.ca/municipal-hall/council-meetings/",
+      "documentTypes": [
+        "agenda-package",
+        "minutes",
+        "reports",
+        "video"
+      ],
+      "enabledByDefault": true,
+      "id": "belcarra",
+      "meetingPortalUrl": "https://belcarra.ca/municipal-hall/council-meetings/",
+      "name": "Belcarra",
+      "officialName": "Village of Belcarra",
+      "platform": "custom"
+    },
+    {
+      "accessNotes": "eSCRIBE embedded via iframe; UI is JS. GetCalendarMeetings POST verified with curl (link types Agenda, PostMinutes, AgendaCover, Addendum, Merged, Video). FileStream.ashx returns 403 browser check to curl; use headless browser. Video via ISI (video.isilive.ca/mapleridge). Calendar PDF: mapleridge.ca/media/file/2026-council-calendar.",
+      "calendarUrl": "https://www.mapleridge.ca/your-government/city-council/council-meetings-documents",
+      "documentTypes": [
+        "agenda",
+        "agenda-cover",
+        "revised-agenda",
+        "agenda-addendum",
+        "minutes",
+        "reports",
+        "video",
+        "notices"
+      ],
+      "enabledByDefault": true,
+      "id": "maple-ridge",
+      "meetingPortalUrl": "https://pub-mapleridge.escribemeetings.com/",
+      "name": "Maple Ridge",
+      "officialName": "City of Maple Ridge",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "eSCRIBE embedded via iframe (?MeetingViewId=1); UI is JS. GetCalendarMeetings POST verified with curl. FileStream.ashx returns 403 browser check to curl; HTML agendas load in headless Chrome. Video via ISI (video.isilive.ca/pittmeadows). Calendar PDF: pittmeadows.ca/sites/default/files/2025-12/2026-Council-Calendar.pdf.",
+      "calendarUrl": "https://www.pittmeadows.ca/city-hall/council/council-meetings",
+      "documentTypes": [
+        "agenda",
+        "agenda-cover",
+        "minutes",
+        "reports",
+        "supplemental-information",
+        "video",
+        "notices"
+      ],
+      "enabledByDefault": true,
+      "id": "pitt-meadows",
+      "meetingPortalUrl": "https://pub-pittmeadows.escribemeetings.com/",
+      "name": "Pitt Meadows",
+      "officialName": "City of Pitt Meadows",
+      "platform": "escribe"
+    },
+    {
+      "accessNotes": "CivicWeb Document Center folder 1400 (year subfolders) is server-rendered; link extraction works. JSON: GET bowenisland.civicweb.net/api/meetings?meetingtypeids=[8,12,16] (curl -g; 8 Regular Council, 12 COTW, 16 Special Council) returns AgendaOpenPdfId/MinutesOpenPdfId; PDFs at /document/<id>/. No video in CivicWeb; YouTube youtube.com/bowenislandmunicipality.",
+      "calendarUrl": "https://bowenislandmunicipality.ca/our-government/council/council-meetings/",
+      "documentTypes": [
+        "agenda",
+        "minutes",
+        "reports",
+        "video"
+      ],
+      "enabledByDefault": true,
+      "id": "bowen-island",
+      "meetingPortalUrl": "https://bowenisland.civicweb.net/filepro/documents/1400/",
+      "name": "Bowen Island",
+      "officialName": "Bowen Island Municipality",
+      "platform": "civicweb"
+    },
+    {
+      "accessNotes": "Not a council: governed by the MVRD Board via the Electoral Area Committee. SharePoint pages render via JS and cover all Metro Vancouver boards, so filter. REST: GET metrovancouver.org/boards/_api/Web/Lists/GetByTitle('Meetings')/items (Accept application/json;odata=nometadata; filter MeetingTitle eq 'Electoral Area Committee Meeting', EventStartDate); Link1..Link25 hold PDF URLs (/boards/ea/EA-YYYY-MM-DD-AGE.pdf). Live at /boards/board-live-webcast; archive on YouTube.",
+      "calendarUrl": "https://metrovancouver.org/boards/meeting-calendar",
+      "documentTypes": [
+        "agenda",
+        "revised-agenda",
+        "minutes",
+        "on-table-items",
+        "presentations",
+        "released-closed-items",
+        "video",
+        "livestream"
+      ],
+      "enabledByDefault": false,
+      "id": "electoral-area-a",
+      "meetingPortalUrl": "https://metrovancouver.org/boards/agendas-and-minutes",
+      "name": "Electoral Area A",
+      "officialName": "Metro Vancouver Regional District - Electoral Area A",
+      "platform": "sharepoint"
+    }
+  ]
+}
