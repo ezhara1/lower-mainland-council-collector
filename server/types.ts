@@ -52,6 +52,7 @@ export type RunRequest = {
   hostAVoice?: string;
   hostBVoice?: string;
   audioConcurrency?: number;
+  browserAssisted?: boolean;
 };
 
 export type RunResult = {

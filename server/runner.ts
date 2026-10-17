@@ -13,6 +13,7 @@ import {
 } from "./storage.js";
 import { loadRegistry } from "./sources.js";
 import type { RunRequest, RunResult } from "./types.js";
+import { dataPath } from "./paths.js";
 
 function createLimiter(limit: number) {
   let active = 0;
@@ -53,6 +54,7 @@ export async function runCollection(request: RunRequest): Promise<RunResult> {
         source,
         request.dateFrom,
         request.dateTo,
+        { browserAssisted: request.browserAssisted },
       );
       for (const document of documents) {
         if (existing.has(document.url)) {
@@ -111,7 +113,7 @@ export async function runCollection(request: RunRequest): Promise<RunResult> {
     } else {
       const audioJobs: Promise<void>[] = [];
       const audioParts: { index: number; path: string }[] = [];
-      const audioDirectory = path.resolve(".data", "generated", runId);
+      const audioDirectory = dataPath("generated", runId);
       const limitAudio = createLimiter(
         Math.max(1, Math.min(request.audioConcurrency ?? 1, 3)),
       );
@@ -170,8 +172,7 @@ export async function runCollection(request: RunRequest): Promise<RunResult> {
       }
       if (request.generateAudio) {
         try {
-          const localAudioPath = path.resolve(
-            ".data",
+          const localAudioPath = dataPath(
             "generated",
             `${request.dateFrom} to ${request.dateTo} - council podcast.wav`,
           );

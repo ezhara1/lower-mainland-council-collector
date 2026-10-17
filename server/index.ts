@@ -6,6 +6,7 @@ import { loadRegistry } from "./sources.js";
 import { getRuns, getSettings, saveSettings } from "./storage.js";
 import { exchangeGoogleCode, googleAuthUrl } from "./google-drive.js";
 import { runCollection } from "./runner.js";
+import { appPath } from "./paths.js";
 
 const app = express();
 app.use(cors());
@@ -41,6 +42,7 @@ const runSchema = z.object({
   hostAVoice: z.string().optional(),
   hostBVoice: z.string().optional(),
   audioConcurrency: z.number().int().min(1).max(3).optional(),
+  browserAssisted: z.boolean().optional(),
 });
 
 app.get("/api/health", (_request, response) => {
@@ -134,12 +136,13 @@ app.use(
 );
 
 if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.resolve("dist")));
-  app.get("*", (_request, response) => {
-    response.sendFile(path.resolve("dist/index.html"));
+  app.use(express.static(appPath("dist")));
+  app.get("/{*splat}", (_request, response) => {
+    response.sendFile(appPath("dist", "index.html"));
   });
 }
 
-app.listen(8787, () => {
-  console.log("Council Collector API listening at http://localhost:8787");
+const port = Number(process.env.PORT ?? 8787);
+app.listen(port, () => {
+  console.log(`Council Collector API listening at http://localhost:${port}`);
 });

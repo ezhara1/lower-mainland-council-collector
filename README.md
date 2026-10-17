@@ -34,6 +34,24 @@ Open `http://localhost:5173`. The API listens on `http://localhost:8787`.
 
 Data and credentials are written to `.data/`, which is excluded from Git.
 
+## Desktop app
+
+The same app runs as a standalone Electron window, with the collector service running inside it.
+
+```bash
+npm install
+npx playwright install chromium
+npm run desktop
+```
+
+To build an installer for the current operating system (`.dmg` on macOS, `.exe` on Windows, `.AppImage` on Linux):
+
+```bash
+npm run package:desktop
+```
+
+Installers are written to `release/`. Build each platform's installer on that platform. The desktop app stores settings, run history, downloads, and browser profiles in the operating system's app-data folder instead of `.data/`. Google sign-in opens in your default browser and returns to the app through `http://localhost:8787/api/google/callback`, so keep port 8787 free while the app is open.
+
 ## Google Drive setup
 
 1. Create a Google Cloud project.
@@ -85,6 +103,8 @@ For distinct Chatterbox hosts, enter paths to two local reference audio files in
 
 Podcast audio is rendered as numbered parts under `.data/generated/<run-id>/`. The app begins speech generation as soon as each script segment is returned, keeps OpenRouter and speech work moving concurrently, and concatenates the completed WAV parts in order. Keep audio concurrency at `1` for typical laptops or Chatterbox; use `2` or `3` only when the machine has sufficient RAM or GPU memory.
 
+For portals protected by Cloudflare, enable browser-assisted access before a run. The app opens a visible local Chrome window with a persistent profile under `.data/browser-profiles/`, waits up to two minutes for any manual verification, and reuses the resulting cookies on later runs.
+
 When using a virtual environment, start the Node app from the activated environment so `python3` resolves to that interpreter.
 
 ## Development checks
@@ -101,5 +121,7 @@ npm audit
 Municipal meeting platforms vary. Some expose stable server-rendered lists, while others use JavaScript-only applications, bot protection, or changing vendor APIs. Each source includes platform and access notes in `source-registry.json`. A source failure is isolated to that municipality and reported at the end of the run.
 
 The collector tries direct HTTP and vendor links first. It starts a headless Playwright browser only when a portal blocks direct requests or returns a JavaScript shell without document links.
+
+Vancouver and West Vancouver sit behind Cloudflare and block cloud or datacenter IP addresses. Vancouver's meeting list loads through a local browser, and its agenda and minutes pages are then downloaded through that browser session. Both work best from a home connection with browser-assisted access enabled.
 
 The collector only follows official municipal or official meeting-portal URLs.
