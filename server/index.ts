@@ -1,32 +1,41 @@
-import path from "node:path";
+import fs from "node:fs/promises";
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
 import { loadRegistry } from "./sources.js";
-import { getRuns, getSettings, saveSettings } from "./storage.js";
-import { exchangeGoogleCode, googleAuthUrl } from "./google-drive.js";
-import { runCollection } from "./runner.js";
+import {
+  getLibrary,
+  getRuns,
+  getSettings,
+  listScripts,
+  resolveOutputFolder,
+  saveSettings,
+  scriptPath,
+} from "./storage.js";
+import { collectDocuments, generateAudio, generateScript } from "./runner.js";
 import { appPath } from "./paths.js";
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "5mb" }));
 
 const settingsSchema = z.object({
-  googleClientId: z.string(),
-  googleClientSecret: z.string(),
-  googleDriveFolderId: z.string(),
+  outputFolder: z.string(),
   openRouterModel: z.string(),
 });
 
-const runSchema = z.object({
+const collectSchema = z.object({
   sourceIds: z.array(z.string()).min(1),
   dateFrom: z.iso.date(),
   dateTo: z.iso.date(),
-  summarize: z.boolean(),
-  openRouterApiKey: z.string().optional(),
+  browserAssisted: z.boolean().optional(),
+});
+
+const scriptSchema = z.object({
+  documentIds: z.array(z.string()).min(1),
+  openRouterApiKey: z.string().min(1),
   openRouterModel: z.string().optional(),
-  outputMode: z.enum(["summary", "podcast", "custom"]).optional(),
+  outputMode: z.enum(["summary", "podcast", "custom"]),
   customPrompt: z.string().optional(),
   podcastStyle: z
     .enum(["analytical", "conversational", "witty", "sensational", "executive"])
@@ -37,89 +46,86 @@ const runSchema = z.object({
   energyLevel: z.enum(["calm", "balanced", "high"]).optional(),
   targetMinutes: z.number().int().min(2).max(60).optional(),
   targetAudience: z.string().optional(),
-  generateAudio: z.boolean().optional(),
-  ttsProvider: z.enum(["kokoro", "chatterbox"]).optional(),
+});
+
+const audioSchema = z.object({
+  scriptName: z.string().min(1),
+  ttsProvider: z.enum(["kokoro", "chatterbox"]),
   hostAVoice: z.string().optional(),
   hostBVoice: z.string().optional(),
   audioConcurrency: z.number().int().min(1).max(3).optional(),
-  browserAssisted: z.boolean().optional(),
 });
+
+type Handler = (request: express.Request, response: express.Response) => Promise<unknown>;
+const route =
+  (handler: Handler) =>
+  (request: express.Request, response: express.Response, next: express.NextFunction) => {
+    handler(request, response).then(
+      (body) => {
+        if (!response.headersSent) response.json(body);
+      },
+      next,
+    );
+  };
+
+async function settingsResponse() {
+  const settings = await getSettings();
+  return { ...settings, resolvedOutputFolder: resolveOutputFolder(settings.outputFolder) };
+}
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
 });
 
-app.get("/api/sources", async (_request, response, next) => {
-  try {
-    response.json(await loadRegistry());
-  } catch (error) {
-    next(error);
-  }
-});
+app.get("/api/sources", route(() => loadRegistry()));
 
-app.get("/api/settings", async (_request, response, next) => {
-  try {
-    const settings = await getSettings();
-    response.json({
-      googleClientId: settings.googleClientId,
-      googleClientSecret: settings.googleClientSecret,
-      googleDriveFolderId: settings.googleDriveFolderId,
-      googleConnected: Boolean(settings.googleRefreshToken),
-      openRouterModel: settings.openRouterModel,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+app.get("/api/settings", route(settingsResponse));
 
-app.put("/api/settings", async (request, response, next) => {
-  try {
-    response.json(await saveSettings(settingsSchema.parse(request.body)));
-  } catch (error) {
-    next(error);
-  }
-});
+app.put(
+  "/api/settings",
+  route(async (request) => {
+    await saveSettings(settingsSchema.parse(request.body));
+    return settingsResponse();
+  }),
+);
 
-app.get("/api/google/auth-url", async (_request, response, next) => {
-  try {
-    response.json({ url: googleAuthUrl(await getSettings()) });
-  } catch (error) {
-    next(error);
-  }
-});
+app.get("/api/runs", route(() => getRuns()));
 
-app.get("/api/google/callback", async (request, response, next) => {
-  try {
-    const code = z.string().parse(request.query.code);
-    const settings = await getSettings();
-    const googleRefreshToken = await exchangeGoogleCode(settings, code);
-    if (googleRefreshToken) await saveSettings({ googleRefreshToken });
-    response.redirect("http://localhost:5173/?google=connected");
-  } catch (error) {
-    next(error);
-  }
-});
+app.get("/api/documents", route(() => getLibrary()));
 
-app.get("/api/runs", async (_request, response, next) => {
-  try {
-    response.json(await getRuns());
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/run", async (request, response, next) => {
-  try {
-    const input = runSchema.parse(request.body);
+app.post(
+  "/api/collect",
+  route(async (request, response) => {
+    const input = collectSchema.parse(request.body);
     if (input.dateFrom > input.dateTo) {
       response.status(400).json({ error: "From date must not be after To date." });
       return;
     }
-    response.json(await runCollection(input));
-  } catch (error) {
-    next(error);
-  }
-});
+    return collectDocuments(input);
+  }),
+);
+
+app.get("/api/scripts", route(() => listScripts()));
+
+app.post("/api/scripts", route((request) => generateScript(scriptSchema.parse(request.body))));
+
+app.get(
+  "/api/scripts/:name",
+  route(async (request) => ({
+    content: await fs.readFile(await scriptPath(String(request.params.name)), "utf8"),
+  })),
+);
+
+app.put(
+  "/api/scripts/:name",
+  route(async (request) => {
+    const { content } = z.object({ content: z.string() }).parse(request.body);
+    await fs.writeFile(await scriptPath(String(request.params.name)), content);
+    return { ok: true };
+  }),
+);
+
+app.post("/api/audio", route((request) => generateAudio(audioSchema.parse(request.body))));
 
 app.use(
   (

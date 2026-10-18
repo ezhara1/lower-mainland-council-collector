@@ -1,19 +1,32 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { collectSource } from "./collector.js";
-import { uploadToDrive } from "./google-drive.js";
+import { extractText } from "./extract.js";
 import { buildDigest } from "./openrouter.js";
+import { splitScript } from "./script-parts.js";
 import { combineAudioParts, synthesize } from "./tts.js";
 import {
+  addToLibrary,
   downloadedUrls,
+  getLibrary,
   getSettings,
+  outputPath,
   rememberDownloaded,
-  saveLocalFile,
+  safeName,
   saveRun,
+  scriptPath,
+  writeOutputFile,
 } from "./storage.js";
 import { loadRegistry } from "./sources.js";
-import type { RunRequest, RunResult } from "./types.js";
-import { dataPath } from "./paths.js";
+import type {
+  AudioRequest,
+  CollectRequest,
+  CollectedDocument,
+  LibraryDocument,
+  RunResult,
+  ScriptRequest,
+} from "./types.js";
 
 function createLimiter(limit: number) {
   let active = 0;
@@ -35,196 +48,166 @@ function createLimiter(limit: number) {
   };
 }
 
-export async function runCollection(request: RunRequest): Promise<RunResult> {
+const errorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+const documentId = (url: string) =>
+  crypto.createHash("sha1").update(url).digest("hex").slice(0, 16);
+
+export async function collectDocuments(request: CollectRequest): Promise<RunResult> {
   const startedAt = new Date().toISOString();
-  const runId = crypto.randomUUID();
-  const settings = await getSettings();
   const { sources } = await loadRegistry();
-  const selected = sources.filter((source) =>
-    request.sourceIds.includes(source.id),
-  );
+  const selected = sources.filter((source) => request.sourceIds.includes(source.id));
   const existing = await downloadedUrls();
-  const collected = [];
   const failedSources: RunResult["failedSources"] = [];
+  const files: RunResult["files"] = [];
+  const warnings: string[] = [];
+  const saved: LibraryDocument[] = [];
   let skippedDuplicates = 0;
 
   for (const source of selected) {
+    let documents: CollectedDocument[];
     try {
-      const documents = await collectSource(
-        source,
-        request.dateFrom,
-        request.dateTo,
-        { browserAssisted: request.browserAssisted },
-      );
-      for (const document of documents) {
-        if (existing.has(document.url)) {
-          skippedDuplicates += 1;
-          continue;
-        }
-        collected.push(document);
-      }
-    } catch (error) {
-      failedSources.push({
-        sourceId: source.id,
-        error: error instanceof Error ? error.message : String(error),
+      documents = await collectSource(source, request.dateFrom, request.dateTo, {
+        browserAssisted: request.browserAssisted,
       });
-    }
-  }
-
-  const files: RunResult["files"] = [];
-  const warnings: string[] = [];
-  for (const document of collected) {
-    const dateFolder = document.meetingDate ?? "Undated";
-    let location: string;
-    try {
-      location = await uploadToDrive(
-        settings,
-        document.municipality,
-        dateFolder,
-        document.fileName,
-        document.mimeType,
-        document.bytes,
-      );
     } catch (error) {
-      const relativePath = path.join(
-        document.municipality,
-        dateFolder,
-        document.fileName,
-      );
-      location = await saveLocalFile(relativePath, document.bytes);
-      warnings.push(
-        `Saved ${document.fileName} locally because Drive upload failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      failedSources.push({ sourceId: source.id, error: errorMessage(error) });
+      continue;
     }
-    files.push({
-      municipality: document.municipality,
-      title: document.title,
-      location,
-    });
-  }
-
-  let digestLocation: string | undefined;
-  let audioLocation: string | undefined;
-  if (request.summarize && collected.length) {
-    if (!request.openRouterApiKey) {
-      warnings.push("Summarization was skipped because no OpenRouter API key was supplied.");
-    } else {
-      const audioJobs: Promise<void>[] = [];
-      const audioParts: { index: number; path: string }[] = [];
-      const audioDirectory = dataPath("generated", runId);
-      const limitAudio = createLimiter(
-        Math.max(1, Math.min(request.audioConcurrency ?? 1, 3)),
-      );
-      const digest = await buildDigest(
-        collected,
-        request.openRouterApiKey,
-        request.openRouterModel || settings.openRouterModel,
-        request.outputMode,
-        request.customPrompt,
-        {
-          style: request.podcastStyle,
-          styleNotes: request.podcastStyleNotes,
-          humorLevel: request.humorLevel,
-          allowProfanity: request.allowProfanity,
-          energyLevel: request.energyLevel,
-          targetMinutes: request.targetMinutes,
-          targetAudience: request.targetAudience,
-        },
-        request.generateAudio && request.outputMode === "podcast"
-          ? async (segment) => {
-              const safeTitle = segment.title.replace(/[^a-z0-9]+/gi, "-");
-              const partPath = path.join(
-                audioDirectory,
-                `${String(segment.index).padStart(3, "0")} - ${safeTitle}.wav`,
-              );
-              audioJobs.push(
-                limitAudio(async () => {
-                  await synthesize(segment.text, partPath, {
-                    provider: request.ttsProvider ?? "kokoro",
-                    hostAVoice: request.hostAVoice || "af_heart",
-                    hostBVoice: request.hostBVoice || "am_michael",
-                  });
-                  audioParts.push({ index: segment.index, path: partPath });
-                }),
-              );
-            }
-          : undefined,
-      );
-      const descriptor =
-        request.outputMode === "podcast" ? "podcast script" : "council digest";
-      const digestName = `${request.dateFrom} to ${request.dateTo} - ${descriptor}.md`;
+    for (const document of documents) {
+      if (existing.has(document.url)) {
+        skippedDuplicates += 1;
+        continue;
+      }
+      existing.add(document.url);
       try {
-        digestLocation = await uploadToDrive(
-          settings,
-          "Regional Digests",
-          `${request.dateFrom} to ${request.dateTo}`,
-          digestName,
-          "text/markdown",
-          Buffer.from(digest),
+        const location = await writeOutputFile(
+          "documents",
+          path.join(
+            safeName(document.municipality),
+            document.meetingDate ?? "Undated",
+            safeName(document.fileName),
+          ),
+          document.bytes,
         );
-      } catch {
-        digestLocation = await saveLocalFile(
-          path.join("Regional Digests", digestName),
-          digest,
-        );
-      }
-      if (request.generateAudio) {
-        try {
-          const localAudioPath = dataPath(
-            "generated",
-            `${request.dateFrom} to ${request.dateTo} - council podcast.wav`,
-          );
-          let audio: Buffer;
-          if (request.outputMode === "podcast" && audioJobs.length) {
-            await Promise.all(audioJobs);
-            audioParts.sort((left, right) => left.index - right.index);
-            audio = await combineAudioParts(
-              audioParts.map((part) => part.path),
-              localAudioPath,
-            );
-          } else {
-            audio = await synthesize(digest, localAudioPath, {
-              provider: request.ttsProvider ?? "kokoro",
-              hostAVoice: request.hostAVoice || "af_heart",
-              hostBVoice: request.hostBVoice || "am_michael",
-            });
-          }
-          try {
-            audioLocation = await uploadToDrive(
-              settings,
-              "Regional Digests",
-              `${request.dateFrom} to ${request.dateTo}`,
-              path.basename(localAudioPath),
-              "audio/wav",
-              audio,
-            );
-          } catch {
-            audioLocation = localAudioPath;
-          }
-        } catch (error) {
-          warnings.push(
-            `Audio generation failed: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+        files.push({
+          municipality: document.municipality,
+          title: document.title,
+          location,
+        });
+        saved.push({
+          id: documentId(document.url),
+          sourceId: document.sourceId,
+          municipality: document.municipality,
+          title: document.title,
+          url: document.url,
+          meetingDate: document.meetingDate,
+          mimeType: document.mimeType,
+          filePath: location,
+          collectedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        warnings.push(`Could not save ${document.fileName}: ${errorMessage(error)}`);
       }
     }
   }
 
-  await rememberDownloaded(collected.map((document) => document.url));
+  await addToLibrary(saved);
+  await rememberDownloaded(saved.map((document) => document.url));
   const result: RunResult = {
-    runId,
+    runId: crypto.randomUUID(),
     startedAt,
     completedAt: new Date().toISOString(),
-    collected: collected.length,
+    collected: saved.length,
     skippedDuplicates,
     failedSources,
     files,
-    digestLocation,
-    audioLocation,
     warnings: [...new Set(warnings)],
   };
   await saveRun(result);
   return result;
+}
+
+export async function generateScript(request: ScriptRequest) {
+  const settings = await getSettings();
+  const chosen = (await getLibrary()).filter((document) =>
+    request.documentIds.includes(document.id),
+  );
+  if (!chosen.length) throw new Error("Choose at least one saved document.");
+
+  const warnings: string[] = [];
+  const documents: { municipality: string; title: string; text: string }[] = [];
+  for (const document of chosen) {
+    try {
+      const text = await extractText(await fs.readFile(document.filePath), document.mimeType);
+      if (!text) warnings.push(`No text could be extracted from ${document.title}.`);
+      documents.push({ municipality: document.municipality, title: document.title, text });
+    } catch (error) {
+      warnings.push(`Skipped ${document.title}: ${errorMessage(error)}`);
+    }
+  }
+  if (!documents.length) throw new Error("None of the chosen documents could be read.");
+
+  const script = await buildDigest(
+    documents,
+    request.openRouterApiKey,
+    request.openRouterModel || settings.openRouterModel,
+    request.outputMode,
+    request.customPrompt,
+    {
+      style: request.podcastStyle,
+      styleNotes: request.podcastStyleNotes,
+      humorLevel: request.humorLevel,
+      allowProfanity: request.allowProfanity,
+      energyLevel: request.energyLevel,
+      targetMinutes: request.targetMinutes,
+      targetAudience: request.targetAudience,
+    },
+  );
+
+  const dates = chosen
+    .map((document) => document.meetingDate)
+    .filter((date): date is string => Boolean(date))
+    .sort();
+  const range = dates.length ? `${dates[0]} to ${dates[dates.length - 1]}` : "undated";
+  const descriptor = {
+    summary: "digest",
+    podcast: "podcast script",
+    custom: "custom output",
+  }[request.outputMode];
+  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "");
+  const name = `${safeName(`${stamp} - ${range} - ${descriptor}`)}.md`;
+  const location = await writeOutputFile("scripts", name, script);
+  return { name, location, documents: documents.length, warnings };
+}
+
+export async function generateAudio(request: AudioRequest) {
+  const source = await scriptPath(request.scriptName);
+  const parts = splitScript(await fs.readFile(source, "utf8"));
+  if (!parts.length) throw new Error("The script has no text to read.");
+
+  const baseName = request.scriptName.replace(/\.(md|txt)$/i, "");
+  const partsFolder = await outputPath("audio", `${baseName} parts`);
+  const limit = createLimiter(Math.max(1, Math.min(request.audioConcurrency ?? 1, 3)));
+  const options = {
+    provider: request.ttsProvider,
+    hostAVoice: request.hostAVoice || "af_heart",
+    hostBVoice: request.hostBVoice || "am_michael",
+  };
+  const partPaths = await Promise.all(
+    parts.map((part, index) =>
+      limit(async () => {
+        const partPath = path.join(
+          partsFolder,
+          `${String(index + 1).padStart(3, "0")} - ${safeName(part.title)}.wav`,
+        );
+        await synthesize(part.text, partPath, options);
+        return partPath;
+      }),
+    ),
+  );
+  const location = await outputPath("audio", `${baseName}.wav`);
+  await combineAudioParts(partPaths, location);
+  return { location, parts: partPaths.length };
 }
