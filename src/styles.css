@@ -492,3 +492,23 @@ button:disabled {
   margin-top: 16px;
   cursor: pointer;
 }
+
+.doc-list {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: 18px;
+}
+
+.script-editor {
+  width: 100%;
+  min-height: 320px;
+  margin-bottom: 18px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
+.panel .result {
+  margin-top: 18px;
+}

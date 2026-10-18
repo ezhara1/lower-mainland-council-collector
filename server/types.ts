@@ -11,10 +11,7 @@ export type MunicipalSource = {
 };
 
 export type AppSettings = {
-  googleClientId: string;
-  googleClientSecret: string;
-  googleDriveFolderId: string;
-  googleRefreshToken: string;
+  outputFolder: string;
   openRouterModel: string;
 };
 
@@ -31,14 +28,30 @@ export type CollectedDocument = {
   text: string;
 };
 
-export type RunRequest = {
+export type LibraryDocument = {
+  id: string;
+  sourceId: string;
+  municipality: string;
+  title: string;
+  url: string;
+  meetingDate: string | null;
+  mimeType: string;
+  filePath: string;
+  collectedAt: string;
+};
+
+export type CollectRequest = {
   sourceIds: string[];
   dateFrom: string;
   dateTo: string;
-  summarize: boolean;
-  openRouterApiKey?: string;
+  browserAssisted?: boolean;
+};
+
+export type ScriptRequest = {
+  documentIds: string[];
+  openRouterApiKey: string;
   openRouterModel?: string;
-  outputMode?: "summary" | "podcast" | "custom";
+  outputMode: "summary" | "podcast" | "custom";
   customPrompt?: string;
   podcastStyle?: "analytical" | "conversational" | "witty" | "sensational" | "executive";
   podcastStyleNotes?: string;
@@ -47,12 +60,14 @@ export type RunRequest = {
   energyLevel?: "calm" | "balanced" | "high";
   targetMinutes?: number;
   targetAudience?: string;
-  generateAudio?: boolean;
-  ttsProvider?: "kokoro" | "chatterbox";
+};
+
+export type AudioRequest = {
+  scriptName: string;
+  ttsProvider: "kokoro" | "chatterbox";
   hostAVoice?: string;
   hostBVoice?: string;
   audioConcurrency?: number;
-  browserAssisted?: boolean;
 };
 
 export type RunResult = {
@@ -63,7 +78,5 @@ export type RunResult = {
   skippedDuplicates: number;
   failedSources: { sourceId: string; error: string }[];
   files: { municipality: string; title: string; location: string }[];
-  digestLocation?: string;
-  audioLocation?: string;
   warnings: string[];
 };

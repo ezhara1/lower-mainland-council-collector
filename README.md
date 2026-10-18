@@ -1,18 +1,17 @@
 # Lower Mainland Council Collector
 
-A local web application that gathers official council agendas, minutes, reports, and meeting attachments from Metro Vancouver municipalities. It can save new documents to Google Drive, analyze them through OpenRouter, and optionally turn a two-host podcast script into local audio with Kokoro or Chatterbox.
+A local web application that gathers official council agendas, minutes, reports, and meeting attachments from Metro Vancouver municipalities. It saves documents to a folder on your computer (for example a Google Drive for desktop folder), writes digests or podcast scripts through OpenRouter, and turns a reviewed script into local audio with Kokoro or Chatterbox. Each of these is a separate step.
 
 ## What it does
 
 - Select municipalities and a `From` / `To` date range.
 - Discover official meeting documents from each configured council portal.
 - Skip URLs collected by earlier runs, including overlapping date ranges.
-- Organize Google Drive uploads by municipality and meeting date.
+- Save documents to `Council Documents/<municipality>/<meeting date>/` in your output folder.
 - Extract text from PDF, DOCX, HTML, and plain-text files.
-- Produce a regional digest, two-host podcast script, or custom output through OpenRouter.
+- Write a regional digest, two-host podcast script, or custom output through OpenRouter from documents you choose, saved to `Scripts/` for review and editing.
 - Configure podcast style, humor, profanity, energy, audience, and target length.
-- Generate WAV audio locally with Kokoro or Chatterbox.
-- Pipeline numbered podcast segments through text to speech while later OpenRouter segments are still being written, then combine them in order.
+- Generate WAV audio locally with Kokoro or Chatterbox from any saved script, including ones you edited. Segments are rendered as numbered parts (up to three at a time) in `Audio/<script> parts/`, then combined in order into `Audio/<script>.wav`.
 
 The source registry covers Metro Vancouver municipalities and Electoral Area A. Communities without a separate municipal council use their governing municipality, for example Fort Langley uses Township of Langley and South Surrey uses City of Surrey.
 
@@ -50,24 +49,21 @@ To build an installer for the current operating system (`.dmg` on macOS, `.exe` 
 npm run package:desktop
 ```
 
-Installers are written to `release/`. Build each platform's installer on that platform. The desktop app stores settings, run history, downloads, and browser profiles in the operating system's app-data folder instead of `.data/`. Google sign-in opens in your default browser and returns to the app through `http://localhost:8787/api/google/callback`, so keep port 8787 free while the app is open.
+Installers are written to `release/`. Build each platform's installer on that platform. The desktop app stores settings, run history, downloads, and browser profiles in the operating system's app-data folder instead of `.data/`. Keep port 8787 free while the app is open.
 
-## Google Drive setup
+## Output folder
 
-1. Create a Google Cloud project.
-2. Enable the Google Drive API.
-3. Configure an OAuth consent screen.
-4. Create a Web application OAuth client.
-5. Add `http://localhost:8787/api/google/callback` as an authorized redirect URI.
-6. Paste the client ID and secret into the app.
-7. Create the destination folder in Drive and paste its folder ID into the app.
-8. Save settings, then select **Connect Google Drive**.
+Set the output folder in the app. To keep everything in Google Drive, install [Google Drive for desktop](https://www.google.com/drive/download/) and choose a folder inside it, for example `~/Google Drive/My Drive/Council Collector` on macOS or `G:\My Drive\Council Collector` on Windows. Drive syncs the files itself, so the app needs no Google sign-in. If you leave the field blank, files go to `output/` inside the app's data folder.
 
-The app requests the narrow `drive.file` scope. It can manage files and folders it creates, rather than access every file in the account.
+The app creates three subfolders:
+
+- `Council Documents/` for collected meeting materials
+- `Scripts/` for digests and podcast scripts
+- `Audio/` for generated WAV files
 
 ## OpenRouter
 
-Enter an OpenRouter API key when running a collection. The key is sent directly to OpenRouter by the local backend and is not saved to disk.
+Enter an OpenRouter API key when writing a script. The key is sent directly to OpenRouter by the local backend and is not saved to disk.
 
 The default model is `google/gemini-2.5-flash`, but any compatible OpenRouter model identifier can be entered in settings.
 
